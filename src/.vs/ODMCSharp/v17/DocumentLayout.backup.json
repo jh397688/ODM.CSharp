@@ -1,0 +1,52 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\jh397\\OneDrive\\\uBB38\uC11C\\GitHub\\ODM.CSharp\\src\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{03499714-0BCC-46F6-8CC7-7030A30F4B61}|ODMCSharp\\ODMCSharp.csproj|c:\\users\\jh397\\onedrive\\\uBB38\uC11C\\github\\odm.csharp\\src\\odmcsharp\\mainwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
+      "RelativeMoniker": "D:0:0:{03499714-0BCC-46F6-8CC7-7030A30F4B61}|ODMCSharp\\ODMCSharp.csproj|solutionrelative:odmcsharp\\mainwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{03499714-0BCC-46F6-8CC7-7030A30F4B61}|ODMCSharp\\ODMCSharp.csproj|c:\\users\\jh397\\onedrive\\\uBB38\uC11C\\github\\odm.csharp\\src\\odmcsharp\\mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{03499714-0BCC-46F6-8CC7-7030A30F4B61}|ODMCSharp\\ODMCSharp.csproj|solutionrelative:odmcsharp\\mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 0,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "MainWindow.xaml",
+              "DocumentMoniker": "C:\\Users\\jh397\\OneDrive\\\uBB38\uC11C\\GitHub\\ODM.CSharp\\src\\ODMCSharp\\MainWindow.xaml",
+              "RelativeDocumentMoniker": "ODMCSharp\\MainWindow.xaml",
+              "ToolTip": "C:\\Users\\jh397\\OneDrive\\\uBB38\uC11C\\GitHub\\ODM.CSharp\\src\\ODMCSharp\\MainWindow.xaml",
+              "RelativeToolTip": "ODMCSharp\\MainWindow.xaml",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
+              "WhenOpened": "2025-07-13T12:59:28.528Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "MainWindow.xaml.cs",
+              "DocumentMoniker": "C:\\Users\\jh397\\OneDrive\\\uBB38\uC11C\\GitHub\\ODM.CSharp\\src\\ODMCSharp\\MainWindow.xaml.cs",
+              "RelativeDocumentMoniker": "ODMCSharp\\MainWindow.xaml.cs",
+              "ToolTip": "C:\\Users\\jh397\\OneDrive\\\uBB38\uC11C\\GitHub\\ODM.CSharp\\src\\ODMCSharp\\MainWindow.xaml.cs",
+              "RelativeToolTip": "ODMCSharp\\MainWindow.xaml.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-07-13T12:59:25.106Z"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
