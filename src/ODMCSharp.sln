@@ -5,7 +5,9 @@ VisualStudioVersion = 17.13.35931.197
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OnvifDeviceManager", "OnvifDeviceManager\OnvifDeviceManager.csproj", "{D5FD2D92-B67A-4A0E-9AC2-C4CCB4EB75D9}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RTSPClient", "RTSPClient\RTSPClient.csproj", "{A1E11614-93CE-4AE4-8598-EEFEF7FAA8B8}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RTSPStream", "RTSPClient\RTSPStream.csproj", "{A1E11614-93CE-4AE4-8598-EEFEF7FAA8B8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RTSPClient.Test", "RTSPClient.Test\RTSPClient.Test.csproj", "{82D4E316-EA97-49F8-8A1A-E9D9DC304FBA}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -21,6 +23,10 @@ Global
 		{A1E11614-93CE-4AE4-8598-EEFEF7FAA8B8}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A1E11614-93CE-4AE4-8598-EEFEF7FAA8B8}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A1E11614-93CE-4AE4-8598-EEFEF7FAA8B8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{82D4E316-EA97-49F8-8A1A-E9D9DC304FBA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{82D4E316-EA97-49F8-8A1A-E9D9DC304FBA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{82D4E316-EA97-49F8-8A1A-E9D9DC304FBA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{82D4E316-EA97-49F8-8A1A-E9D9DC304FBA}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
