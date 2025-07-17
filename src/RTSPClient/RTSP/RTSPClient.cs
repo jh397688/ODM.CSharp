@@ -12,7 +12,7 @@ using System.Threading.Tasks;
 
 namespace RTSPStream.RTSP
 {
-    internal delegate void RTSPClientReceivedEventHandler(object packet);
+    internal delegate void RTSPClientReceivedEventHandler(RTSPTrackTypeEnum rtspTrackTypeEnum, byte[] payload);
 
     internal class RTSPClient : IDisposable
     {
@@ -23,6 +23,7 @@ namespace RTSPStream.RTSP
         private NetworkStream _stream;
         private CancellationTokenSource _recvCts;
         private Task _recvTask;
+        private List<RTSPTrackInfoBase> _rtpsTrackInfoList;
         private int _cseq = 1;
         private string _sessionId;
 
@@ -36,6 +37,7 @@ namespace RTSPStream.RTSP
         {
             RTSPUri = rtspUri;
             RTSPOver = rtspOver;
+            _rtpsTrackInfoList = new List<RTSPTrackInfoBase>();
         }
 
         internal void SetAuth(string username, string password)
@@ -44,32 +46,29 @@ namespace RTSPStream.RTSP
             Password = password;
         }
 
-        internal void Connect()
+        internal List<RTSPTrackTypeEnum> Connect()
         {
             _tcpClient = new TcpClient();
             _tcpClient.Connect(RTSPUri.Host, RTSPUri.Port > 0 ? RTSPUri.Port : 554);
             _stream = _tcpClient.GetStream();
-        }
 
-        internal void Play()
-        {
             var authTrials = new List<Func<IRTSPAuthenticator>>
             {
-                () => 
+                () =>
                     new AnonymousAuthenticator(),
-                () => 
+                () =>
                 {
                     var auth = new BasicAuthenticator();
                     auth.SetCredential(Username, Password);
                     return auth;
                 },
-                () => 
+                () =>
                 {
                     var auth = new DigestMD5Authenticator();
                     auth.SetCredential(Username, Password);
                     return auth;
                 },
-                () => 
+                () =>
                 {
                     var auth = new DigestSHA256Authenticator();
                     auth.SetCredential(Username, Password);
@@ -85,21 +84,7 @@ namespace RTSPStream.RTSP
 
                 if (IsResponseOK(response))
                 {
-                    string transportHeader = RTSPOver == RTSPoverEnum.RTSPoverTCP ?
-                        "RTP/AVP/TCP;unicast;interleaved=0-1" : "RTP/AVP;unicast;client_port=5000-5001";
-
-                    string setupResponse = SendSetupMethod(GetTrackUriFromSdp(response), transportHeader);
-                    if (!IsResponseOK(setupResponse))
-                        continue;
-
-                    string playResponse = SendPlayMethod();
-                    if (IsResponseOK(playResponse))
-                    {
-                        var types = _rtspAuthenticator.GetType().ToString().Split('.');
-
-                        Console.WriteLine($"RTSP {types[types.Length - 1]} PLAY 성공");
-                        return;
-                    }
+                    return ParseSdpAndAddTracks(response);
                 }
                 else if (IsUnauthorized(response, out var challenge))
                 {
@@ -110,27 +95,38 @@ namespace RTSPStream.RTSP
                     response = SendDescribeMethod();
                     if (IsResponseOK(response))
                     {
-                        string transportHeader = RTSPOver == RTSPoverEnum.RTSPoverTCP ? 
-                            "RTP/AVP/TCP;unicast;interleaved=0-1" : "RTP/AVP;unicast;client_port=5000-5001";
-
-                        string setupResponse = SendSetupMethod(GetTrackUriFromSdp(response), transportHeader);
-                        if (!IsResponseOK(setupResponse))
-                            continue;
-
-                        string playResponse = SendPlayMethod();
-                        if (IsResponseOK(playResponse))
-                        {
-                            var types = _rtspAuthenticator.GetType().ToString().Split('.');
-
-                            Console.WriteLine($"RTSP {types[types.Length - 1]} PLAY 재시도 성공");
-                            return;
-                        }
+                        return ParseSdpAndAddTracks(response);
                     }
                 }
-                // 이 인증자에서도 실패면 다음 인증자로 트라이
             }
 
-            throw new Exception("RTSP PLAY: 모든 인증 방식 실패 또는 서버 접속 불가");
+            throw new Exception("RTSP Connect: 모든 인증 방식 실패 또는 서버 접속 불가");
+        }
+
+        internal void Play(RTSPTrackTypeEnum rtspTrackType)
+        {
+            var info = _rtpsTrackInfoList.Find(info =>  info.TrackType == rtspTrackType);
+
+            string transportHeader = RTSPOver == RTSPoverEnum.RTSPoverTCP ? "RTP/AVP/TCP;unicast;interleaved=0-1" : "RTP/AVP;unicast;client_port=5000-5001";
+
+            string setupResponse = SendSetupMethod(info.ControlUrl, transportHeader);
+            if (!IsResponseOK(setupResponse))
+                return;
+
+            var pair = ParseInterleavedFromResponse(setupResponse);
+            if (pair != null)
+                info.SetInterleaved(pair.Value.rtp, pair.Value.rtcp);
+            else
+                return;
+
+            string playResponse = SendPlayMethod();
+            if (IsResponseOK(playResponse))
+            {
+                var types = _rtspAuthenticator.GetType().ToString().Split('.');
+
+                Console.WriteLine($"RTSP {types[types.Length - 1]} {rtspTrackType.ToString()} PLAY 성공");
+                return;
+            }
         }
 
         internal void StartReceiveAsync()
@@ -173,15 +169,15 @@ namespace RTSPStream.RTSP
                         byte[] payload = new byte[length];
                         ms.Read(payload, 0, length);
 
-                        // 패킷 분배
-                        if (channel % 2 == 0) // RTP(채널 0, 2, ...)
+                        var trackInfo = _rtpsTrackInfoList.FirstOrDefault(info => info.RTPInterleaved == channel || info.RTCPInterleaved == channel);
+                        if (trackInfo != null)
                         {
-                            RTPReceivedEvent?.Invoke(payload);
+                            if (channel == trackInfo.RTPInterleaved)
+                                RTPReceivedEvent?.Invoke(trackInfo.TrackType, payload);
+                            else if (channel == trackInfo.RTCPInterleaved)
+                                RTCPReceivedEvent?.Invoke(trackInfo.TrackType, payload);
                         }
-                        else // RTCP(채널 1, 3, ...)
-                        {
-                            RTCPReceivedEvent?.Invoke(payload);
-                        }
+
 
                         // 스트림에서 읽은 만큼 버리기
                         byte[] remain = ms.ToArray().Skip((int)ms.Position).ToArray();
@@ -345,6 +341,8 @@ namespace RTSPStream.RTSP
 
         private string SendAndReceive(string request)
         {
+            Console.WriteLine($"request : {request}\n");
+
             byte[] buffer = Encoding.ASCII.GetBytes(request);
             _stream.Write(buffer, 0, buffer.Length);
 
@@ -359,6 +357,9 @@ namespace RTSPStream.RTSP
                 if (sessionHeader.Success)
                     _sessionId = sessionHeader.Groups[1].Value.Trim();
             }
+
+            Console.WriteLine($"response : {response}\n");
+
             return response;
         }
         #endregion
@@ -386,29 +387,154 @@ namespace RTSPStream.RTSP
             return false;
         }
 
-        // DESCRIBE 응답에서 SDP 분석해 트랙 URI 추출(실전은 좀 더 복잡)
-        private string GetTrackUriFromSdp(string sdpResponse)
+        private List<RTSPTrackTypeEnum> ParseSdpAndAddTracks(string sdp)
         {
-            // 1. 트랙별 control:trackID=xxx 우선 사용
-            var trackMatch = Regex.Match(sdpResponse, @"a=control:(trackID=\d+)", RegexOptions.IgnoreCase);
-            if (trackMatch.Success)
-                return $"{RTSPUri}/{trackMatch.Groups[1].Value}";
+            var result = new List<RTSPTrackTypeEnum>(); ;
 
-            // 2. 전체 control:rtsp로 시작 (절대 URI)도 지원
-            var absMatch = Regex.Match(sdpResponse, @"a=control:(rtsp://[^\r\n]+)", RegexOptions.IgnoreCase);
-            if (absMatch.Success)
-                return absMatch.Groups[1].Value;
+            var lines = sdp.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
 
-            // 3. a=control:* (글로벌) 이면 원본 URI 사용
-            var globalMatch = Regex.Match(sdpResponse, @"a=control:\*", RegexOptions.IgnoreCase);
-            if (globalMatch.Success)
-                return RTSPUri.ToString();
+            int trackIdSeed = 1;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (lines[i].StartsWith("m=", StringComparison.OrdinalIgnoreCase))
+                {
+                    // 트랙 정보 임시 변수
+                    string mediaType = null;
+                    string codec = null;
+                    int? sampleRate = null, channels = null;
+                    int? width = null, height = null;
+                    double? frameRate = null;
+                    string fmtp = null, control = null, appType = null;
+                    int payloadType = -1;
 
-            // 4. 그 외에는 Content-Base 등도 조합 가능
-            return RTSPUri.ToString();
+                    // m=video 0 RTP/AVP 96
+                    var mParts = lines[i].Substring(2).Split(' ');
+                    mediaType = mParts[0].Trim();
+
+                    // payloadType은 보통 마지막 값
+                    if (mParts.Length > 3 && int.TryParse(mParts[3], out int pt))
+                        payloadType = pt;
+
+                    // 다음 "m=" 전까지의 SDP 파싱
+                    int j = i + 1;
+                    for (; j < lines.Length && !lines[j].StartsWith("m=", StringComparison.OrdinalIgnoreCase); j++)
+                    {
+                        var line = lines[j];
+                        if (line.StartsWith("a=rtpmap:", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // a=rtpmap:96 H264/90000 or a=rtpmap:97 PCMU/8000/1
+                            var map = line.Substring("a=rtpmap:".Length).Split(' ');
+                            if (map.Length == 2)
+                            {
+                                var rtpmapTokens = map[1].Split('/');
+                                codec = rtpmapTokens[0];
+                                if (rtpmapTokens.Length > 1 && int.TryParse(rtpmapTokens[1], out int sr))
+                                    sampleRate = sr;
+                                if (rtpmapTokens.Length > 2 && int.TryParse(rtpmapTokens[2], out int ch))
+                                    channels = ch;
+                            }
+                        }
+                        else if (line.StartsWith("a=fmtp:", StringComparison.OrdinalIgnoreCase))
+                        {
+                            fmtp = line.Substring("a=fmtp:".Length).Trim();
+                        }
+                        else if (line.StartsWith("a=framesize:", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // a=framesize:96 1920-1080
+                            var tokens = line.Split(' ');
+                            if (tokens.Length == 2)
+                            {
+                                var size = tokens[1].Split('-');
+                                if (size.Length == 2 && int.TryParse(size[0], out int w) && int.TryParse(size[1], out int h))
+                                {
+                                    width = w;
+                                    height = h;
+                                }
+                            }
+                        }
+                        else if (line.StartsWith("a=framerate:", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // a=framerate:30
+                            var val = line.Substring("a=framerate:".Length).Trim();
+                            if (double.TryParse(val, out double fr))
+                                frameRate = fr;
+                        }
+                        else if (line.StartsWith("a=control:", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // a=control:trackID=1
+                            control = line.Substring("a=control:".Length).Trim();
+                            // trackID 추출
+                            var tid = ExtractTrackIdFromControl(control);
+                            if (tid != null)
+                                trackIdSeed = tid.Value;
+                        }
+                        else if (line.StartsWith("a=rtpmap:", StringComparison.OrdinalIgnoreCase) && mediaType == "application")
+                        {
+                            // application은 rtpmap 값이 타입인 경우가 있음 (예: vnd.onvif.metadata)
+                            var map = line.Substring("a=rtpmap:".Length).Split(' ');
+                            if (map.Length == 2)
+                                appType = map[1].Split('/')[0];
+                        }
+                    }
+
+                    // 트랙 타입별 객체 생성
+                    switch (mediaType.ToLower())
+                    {
+                        case "video":
+                            result.Add(RTSPTrackTypeEnum.Video);
+
+                            _rtpsTrackInfoList.Add(new RTSPVideoTrackInfo(
+                                codec ?? "unknown",
+                                trackIdSeed,
+                                control ?? $"trackID={trackIdSeed}",
+                                width ?? 0,
+                                height ?? 0,
+                                frameRate ?? 0,
+                                fmtp
+                            ));
+                            break;
+                        case "audio":
+                            result.Add(RTSPTrackTypeEnum.Audio);
+
+                            _rtpsTrackInfoList.Add(new RTSPAudioTrackInfo(
+                                codec ?? "unknown",
+                                trackIdSeed,
+                                control ?? $"trackID={trackIdSeed}",
+                                sampleRate ?? 0,
+                                channels ?? 1
+                            ));
+                            break;
+                        case "application":
+                            result.Add(RTSPTrackTypeEnum.Application);
+
+                            _rtpsTrackInfoList.Add(new RTSPApplicationTrackInfo(
+                                codec ?? "unknown",
+                                trackIdSeed,
+                                control ?? $"trackID={trackIdSeed}",
+                                appType ?? "unknown"
+                            ));
+                            break;
+                            // TODO: text/image/data 등 추가 가능
+                    }
+
+                    // 다음 m= 라인에서 이어서 탐색
+                    i = j - 1;
+                    trackIdSeed++;
+                }
+            }
+
+            return result;
         }
 
-        // 인증 방식 제안에 따라 인증자 선택
+        private int? ExtractTrackIdFromControl(string control)
+        {
+            if (string.IsNullOrEmpty(control)) return null;
+            var match = System.Text.RegularExpressions.Regex.Match(control, @"trackID\s*=\s*(\d+)");
+            if (match.Success && int.TryParse(match.Groups[1].Value, out int tid))
+                return tid;
+            return null;
+        }
+
         private IRTSPAuthenticator SuggestAuthenticatorFromChallenge(RTSPAuthChallenge challenge, string username, string password)
         {
             if (challenge.Type == RTSPAuthTypeEnum.Digest)
@@ -427,6 +553,24 @@ namespace RTSPStream.RTSP
                 var a = new BasicAuthenticator(); a.SetCredential(username, password); return a;
             }
 
+            return null;
+        }
+
+        private (int rtp, int rtcp)? ParseInterleavedFromResponse(string response)
+        {
+            // Transport 헤더만 추출
+            var lines = response.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+            string transportLine = lines.FirstOrDefault(l => l.StartsWith("Transport:", StringComparison.OrdinalIgnoreCase));
+            if (transportLine == null) return null;
+
+            // 정규식 파싱
+            var match = Regex.Match(transportLine, @"interleaved\s*=\s*(\d+)-(\d+)");
+            if (match.Success)
+            {
+                int rtp = int.Parse(match.Groups[1].Value);
+                int rtcp = int.Parse(match.Groups[2].Value);
+                return (rtp, rtcp);
+            }
             return null;
         }
         #endregion
