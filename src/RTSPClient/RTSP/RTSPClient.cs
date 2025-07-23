@@ -1,4 +1,5 @@
-﻿using RTSPStream.RTSP.Authenticator;
+﻿using RTSPStream.Lib;
+using RTSPStream.RTSP.Authenticator;
 using RTSPStream.RTSP.Authenticator.Impl;
 using RTSPStream.RTSP.Enum;
 using RTSPStream.RTSP.Info;
@@ -12,7 +13,7 @@ using System.Threading.Tasks;
 
 namespace RTSPStream.RTSP
 {
-    internal delegate void RTSPClientReceivedEventHandler(RTSPTrackTypeEnum rtspTrackTypeEnum, byte[] payload);
+    internal delegate void RTSPClientReceivedEventHandler(RTSPTrackTypeEnum rtspTrackTypeEnum, int chanel, byte[] payload);
 
     internal class RTSPClient : IDisposable
     {
@@ -23,6 +24,7 @@ namespace RTSPStream.RTSP
         private NetworkStream _stream;
         private CancellationTokenSource _recvCts;
         private Task _recvTask;
+        private CommonWaiter _commonWaiter;
         private List<RTSPTrackInfoBase> _rtpsTrackInfoList;
         private int _cseq = 1;
         private string _sessionId;
@@ -37,6 +39,7 @@ namespace RTSPStream.RTSP
         {
             RTSPUri = rtspUri;
             RTSPOver = rtspOver;
+            _commonWaiter = new CommonWaiter();
             _rtpsTrackInfoList = new List<RTSPTrackInfoBase>();
         }
 
@@ -51,6 +54,9 @@ namespace RTSPStream.RTSP
             _tcpClient = new TcpClient();
             _tcpClient.Connect(RTSPUri.Host, RTSPUri.Port > 0 ? RTSPUri.Port : 554);
             _stream = _tcpClient.GetStream();
+
+            _recvCts = new CancellationTokenSource();
+            _recvTask = Task.Run(() => ReceiveLoopAsync(_recvCts.Token));
 
             var authTrials = new List<Func<IRTSPAuthenticator>>
             {
@@ -75,6 +81,7 @@ namespace RTSPStream.RTSP
                     return auth;
                 }
             };
+            int cseq = 0;
 
             foreach (var authFactory in authTrials)
             {
@@ -82,7 +89,7 @@ namespace RTSPStream.RTSP
 
                 string response = SendDescribeMethod();
 
-                if (IsResponseOK(response))
+                if (IsResponseOK(response, out cseq) && _cseq - 1 == cseq)
                 {
                     return ParseSdpAndAddTracks(response);
                 }
@@ -93,7 +100,7 @@ namespace RTSPStream.RTSP
                         continue;
 
                     response = SendDescribeMethod();
-                    if (IsResponseOK(response))
+                    if (IsResponseOK(response, out cseq) && _cseq - 1 == cseq)
                     {
                         return ParseSdpAndAddTracks(response);
                     }
@@ -103,105 +110,135 @@ namespace RTSPStream.RTSP
             throw new Exception("RTSP Connect: 모든 인증 방식 실패 또는 서버 접속 불가");
         }
 
-        internal void Play(RTSPTrackTypeEnum rtspTrackType)
+        internal void DisConnect()
         {
-            var info = _rtpsTrackInfoList.Find(info =>  info.TrackType == rtspTrackType);
-
-            string transportHeader = RTSPOver == RTSPoverEnum.RTSPoverTCP ? "RTP/AVP/TCP;unicast;interleaved=0-1" : "RTP/AVP;unicast;client_port=5000-5001";
-
-            string setupResponse = SendSetupMethod(info.ControlUrl, transportHeader);
-            if (!IsResponseOK(setupResponse))
-                return;
-
-            var pair = ParseInterleavedFromResponse(setupResponse);
-            if (pair != null)
-                info.SetInterleaved(pair.Value.rtp, pair.Value.rtcp);
-            else
-                return;
-
-            string playResponse = SendPlayMethod();
-            if (IsResponseOK(playResponse))
-            {
-                var types = _rtspAuthenticator.GetType().ToString().Split('.');
-
-                Console.WriteLine($"RTSP {types[types.Length - 1]} {rtspTrackType.ToString()} PLAY 성공");
-                return;
-            }
-        }
-
-        internal void StartReceiveAsync()
-        {
-            _recvCts = new CancellationTokenSource();
-            _recvTask = Task.Run(() => ReceiveLoopAsync(_recvCts.Token));
+            Dispose();
         }
 
         internal async Task ReceiveLoopAsync(CancellationToken token)
         {
-            var buffer = new byte[4096];
-            var ms = new MemoryStream();
+            var buffer = new List<byte>();
+            var tmp = new byte[4096];
 
             while (!token.IsCancellationRequested)
             {
-                int bytesRead = await _stream.ReadAsync(buffer, 0, buffer.Length, token);
+                int bytesRead = await _stream.ReadAsync(tmp, 0, tmp.Length, token);
+                if (bytesRead == 0) 
+                    break;
 
-                if (bytesRead == 0)
-                    break; // 연결 종료
+                buffer.AddRange(tmp.Take(bytesRead));
 
-                ms.Write(buffer, 0, bytesRead);
-
-                while (ms.Length >= 4)
+                while (buffer.Count > 0)
                 {
-                    ms.Position = 0;
-                    byte[] header = new byte[4];
-                    ms.Read(header, 0, 4);
-
-                    if (header[0] == 0x24) // '$'
+                    if (buffer[0] != 0x24)
                     {
-                        int channel = header[1];
-                        int length = (header[2] << 8) | header[3];
-
-                        if (ms.Length - 4 < length)
-                        {
-                            ms.Position = ms.Length; // 데이터 부족, 다음 수신까지 대기
+                        var hdrEnd = FindSequence(buffer, Encoding.ASCII.GetBytes("\r\n\r\n"));
+                        if (hdrEnd < 0) 
                             break;
-                        }
 
-                        byte[] payload = new byte[length];
-                        ms.Read(payload, 0, length);
+                        var headerBytes = buffer.Take(hdrEnd + 4).ToArray();
+                        var headerText = Encoding.UTF8.GetString(headerBytes);
 
-                        var trackInfo = _rtpsTrackInfoList.FirstOrDefault(info => info.RTPInterleaved == channel || info.RTCPInterleaved == channel);
-                        if (trackInfo != null)
-                        {
-                            if (channel == trackInfo.RTPInterleaved)
-                                RTPReceivedEvent?.Invoke(trackInfo.TrackType, payload);
-                            else if (channel == trackInfo.RTCPInterleaved)
-                                RTCPReceivedEvent?.Invoke(trackInfo.TrackType, payload);
-                        }
+                        int contentLength = 0;
+                        var m = Regex.Match(headerText, @"Content-Length:\s*(\d+)", RegexOptions.IgnoreCase);
+                        if (m.Success) contentLength = int.Parse(m.Groups[1].Value);
 
+                        if (buffer.Count < hdrEnd + 4 + contentLength) 
+                            break;
 
-                        // 스트림에서 읽은 만큼 버리기
-                        byte[] remain = ms.ToArray().Skip((int)ms.Position).ToArray();
-                        ms.SetLength(0);
-                        ms.Position = 0;
-                        ms.Write(remain, 0, remain.Length);
-                        ms.Position = 0;
+                        var bodyBytes = buffer.Skip(hdrEnd + 4).Take(contentLength).ToArray();
+                        buffer.RemoveRange(0, hdrEnd + 4 + contentLength);
+
+                        var fullResponse = Encoding.UTF8.GetString(headerBytes) +
+                                           Encoding.UTF8.GetString(bodyBytes);
+
+                        Console.WriteLine($"RTSPAsnc : {fullResponse}");
+
+                        _commonWaiter.SetData(fullResponse);
                     }
                     else
                     {
-                        string rtspAsnc = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                        Console.WriteLine($"RTSPAsnc : {rtspAsnc}");
-                        // RTSP 텍스트 패킷(명령 응답 등)일 수도 있음.
-                        // (여기서는 RTP/RTCP만 처리, 명령 응답은 따로 처리 필요)
-                        break;
+                        if (buffer.Count < 4) 
+                            break;
+
+                        int channel = buffer[1];
+                        int length = (buffer[2] << 8) | buffer[3];
+
+                        if (buffer.Count < 4 + length) 
+                            break;
+
+                        var payload = buffer.Skip(4).Take(length).ToArray();
+                        buffer.RemoveRange(0, 4 + length);
+
+                        var track = _rtpsTrackInfoList.FirstOrDefault(info => channel == info.RTPInterleaved || channel == info.RTCPInterleaved);
+                        if (track != null)
+                        {
+                            if (channel == track.RTPInterleaved)
+                                RTPReceivedEvent?.Invoke(track.TrackType, channel, payload);
+                            else
+                                RTCPReceivedEvent?.Invoke(track.TrackType, channel, payload);
+                        }
                     }
                 }
             }
         }
 
-        internal void StopReceiveAsync()
+        private static int FindSequence(List<byte> buffer, byte[] seq)
         {
-            _recvCts?.Cancel();
-            _recvTask?.Wait();
+            for (int i = 0; i <= buffer.Count - seq.Length; i++)
+            {
+                bool ok = true;
+                for (int j = 0; j < seq.Length; j++)
+                {
+                    if (buffer[i + j] != seq[j]) { ok = false; break; }
+                }
+                if (ok) return i;
+            }
+            return -1;
+        }
+
+
+        internal bool Play(RTSPTrackTypeEnum rtspTrackType, out int rtpChannel, out int rtcpChannel)
+        {
+            rtpChannel = 0;
+            rtcpChannel = 0;
+            int cseq = 0;
+
+            var info = _rtpsTrackInfoList.Find(info => info.TrackType == rtspTrackType);
+
+            string transportHeader = RTSPOver == RTSPoverEnum.RTSPoverTCP ? "RTP/AVP/TCP;unicast;interleaved=0-1" : "RTP/AVP;unicast;client_port=5000-5001";
+
+            string setupResponse = SendSetupMethod(info.ControlUrl, transportHeader);
+            if (!IsResponseOK(setupResponse, out cseq) || _cseq - 1 != cseq)
+                return false;
+
+            var pair = ParseInterleavedFromResponse(setupResponse);
+            if (pair != null)
+                info.SetInterleaved(pair.Value.rtp, pair.Value.rtcp);
+            else
+                return false;
+
+            string playResponse = SendPlayMethod();
+            if (IsResponseOK(playResponse, out cseq) || _cseq - 1 != cseq)
+            {
+                rtpChannel = pair.Value.rtp;
+                rtcpChannel = pair.Value.rtcp;
+
+                return true;
+            }
+            else
+                return false;
+        }
+
+        internal bool Stop(RTSPTrackTypeEnum rtspTrackType)
+        {
+            var info = _rtpsTrackInfoList.Find(info => info.TrackType == rtspTrackType);
+
+            string setupResponse = SendTeardownMethod(info.ControlUrl);
+            if (IsResponseOK(setupResponse, out int cseq) && _cseq - 1 == cseq)
+                return true;
+            else
+                return false;
         }
 
         #region SendMethod
@@ -256,7 +293,7 @@ namespace RTSPStream.RTSP
             string request =
                 $"SETUP {trackUri} RTSP/1.0\r\n" +
                 $"CSeq: {_cseq++}\r\n" +
-                "User-Agent: RTSPStream/1.0\r\n" +
+                $"User-Agent: RTSPStream/1.0\r\n" +
                 $"Transport: {transportHeader}\r\n";
 
             if (!string.IsNullOrEmpty(_sessionId))
@@ -267,7 +304,7 @@ namespace RTSPStream.RTSP
                 request += authHeader + "\r\n";
 
             request += "\r\n";
-            return SendAndReceive(request);
+            return SendAndReceive(request, true);
         }
 
         private string SendPlayMethod()
@@ -316,17 +353,16 @@ namespace RTSPStream.RTSP
             return SendAndReceive(request);
         }
 
-        private string SendTeardownMethod()
+        private string SendTeardownMethod(string trackUri)
         {
             var reqInfo = new RTSPRequestInfo
             {
                 RTSPMethod = RTSPMethodEnum.TEARDOWN,
                 RTSPUri = RTSPUri
             };
-            string request =
-                $"TEARDOWN {RTSPUri} RTSP/1.0\r\n" +
-                $"CSeq: {_cseq++}\r\n" +
-                "User-Agent: RTSPStream/1.0\r\n";
+            string request = $"TEARDOWN {trackUri} RTSP/1.0\r\n" +
+                             $"CSeq: {_cseq++}\r\n" + 
+                             $"User-Agent: RTSPStream/1.0\r\n";
 
             if (!string.IsNullOrEmpty(_sessionId))
                 request += $"Session: {_sessionId}\r\n";
@@ -339,34 +375,34 @@ namespace RTSPStream.RTSP
             return SendAndReceive(request);
         }
 
-        private string SendAndReceive(string request)
+        private string SendAndReceive(string request, bool flag = false)
         {
             Console.WriteLine($"request : {request}\n");
 
             byte[] buffer = Encoding.ASCII.GetBytes(request);
             _stream.Write(buffer, 0, buffer.Length);
 
-            var responseBuffer = new byte[4096];
-            int bytesRead = _stream.Read(responseBuffer, 0, responseBuffer.Length);
-            string response = Encoding.ASCII.GetString(responseBuffer, 0, bytesRead);
+            string response = "";
 
-            // Session ID 추출 (SETUP 후에만)
-            if (request.StartsWith("SETUP", StringComparison.OrdinalIgnoreCase))
+            if (_commonWaiter.WaitForData(new TimeSpan(0, 0, 5), out response))
             {
-                var sessionHeader = Regex.Match(response, @"Session:\s*([^\r\n;]+)", RegexOptions.IgnoreCase);
-                if (sessionHeader.Success)
-                    _sessionId = sessionHeader.Groups[1].Value.Trim();
+                // Session ID 추출 (SETUP 후에만)
+                if (request.StartsWith("SETUP", StringComparison.OrdinalIgnoreCase))
+                {
+                    var sessionHeader = Regex.Match(response, @"Session:\s*([^\r\n;]+)", RegexOptions.IgnoreCase);
+                    if (sessionHeader.Success)
+                        _sessionId = sessionHeader.Groups[1].Value.Trim();
+                }
             }
-
-            Console.WriteLine($"response : {response}\n");
 
             return response;
         }
         #endregion
 
         #region ReceiveParser
-        private bool IsResponseOK(string response)
+        private bool IsResponseOK(string response, out int cseq)
         {
+            cseq = ParseCSeqFromResponse(response);
             return response.StartsWith("RTSP/1.0 200", StringComparison.OrdinalIgnoreCase);
         }
 
@@ -573,11 +609,32 @@ namespace RTSPStream.RTSP
             }
             return null;
         }
+
+        private int ParseCSeqFromResponse(string response)
+        {
+            // Transport 헤더만 추출
+            var lines = response.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+            string transportLine = lines.FirstOrDefault(l => l.StartsWith("CSeq:", StringComparison.OrdinalIgnoreCase));
+            if (transportLine == null) return 0;
+
+            // 정규식 파싱
+            var match = Regex.Match(transportLine, @"CSeq: (\d+)");
+            if (match.Success)
+            {
+                return int.Parse(match.Groups[1].Value);
+            }
+
+            return 0;
+        }
         #endregion
 
         public void Dispose()
         {
-            
+            _recvCts?.Cancel();
+            _recvTask?.Wait();
+
+            _recvCts = null;
+            _recvTask = null;
         }
     }
 }
