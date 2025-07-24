@@ -11,12 +11,14 @@ namespace RTSPStream.RTSP.Authenticator.Impl
 {
     internal class DigestMD5Authenticator : IRTSPAuthenticator
     {
+        public RTSPAuthTypeEnum RTSPAuthType => RTSPAuthTypeEnum.Digest;
+        public RTSPAuthDigestAlgorithmEnum RTSPAuthDigestAlgorithm => RTSPAuthDigestAlgorithmEnum.MD5;
         private string? _username;
         private string? _password;
 
         public string? GetAuthorizationHeader(RTSPRequestInfo request, RTSPAuthChallenge? challenge)
         {
-            if (challenge == null || challenge.Type != RTSPAuthTypeEnum.Digest || challenge.Algorithm != RTSPAuthDigestAlgorithmEnum.MD5)
+            if (challenge == null || challenge.Type != RTSPAuthType || challenge.Algorithm != RTSPAuthDigestAlgorithm)
                 return null;
             if (string.IsNullOrEmpty(_username) || string.IsNullOrEmpty(_password))
                 return null;

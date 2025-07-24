@@ -9,6 +9,7 @@ namespace RTSPStream.RTSP.Enum
     public enum RTSPAuthTypeEnum
     {
         None,
+        Anonymous,
         Basic,
         Digest,
     }

@@ -8,6 +8,7 @@ namespace RTSPStream.RTSP.Enum
 {
     public enum RTSPAuthDigestAlgorithmEnum
     {
+        None,
         MD5,
         SHA256,
     }
