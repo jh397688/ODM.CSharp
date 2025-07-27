@@ -24,8 +24,6 @@ namespace RTSPStream
             RTSPOver = rtspOver;
 
             _rtspClient = new RTSPClient(RTSPUri, RTSPOver);
-            _rtspClient.RTPReceivedEvent += RTPReceived;
-            _rtspClient.RTCPReceivedEvent += RTCPReceived;
             _mediaStreamManagerList = new List<MediaStreamManager>();
 
             RTSPTrackTypeList = new List<RTSPTrackTypeEnum>();
@@ -60,7 +58,12 @@ namespace RTSPStream
 
                 if (result)
                 {
-                    _mediaStreamManagerList.Add(new MediaStreamManager(RTSPOver, rtspTrackType, rtpChannel, rtcpChannel));
+                    var mediaStreamManager = new MediaStreamManager(RTSPOver, rtspTrackType, rtpChannel, rtcpChannel);
+                    _rtspClient.RTPReceivedEvent += mediaStreamManager.RTPReceived;
+                    _rtspClient.RTCPReceivedEvent += mediaStreamManager.RTCPReceived;
+
+
+                    _mediaStreamManagerList.Add(mediaStreamManager);
                 }
             }
 
@@ -80,17 +83,7 @@ namespace RTSPStream
             }
 
             return result;
-        }
-
-        private void RTPReceived(RTSPTrackTypeEnum rtspTrackTypeEnum, int channel, byte[] payload)
-        {
-            Console.WriteLine($"RTP Received : {rtspTrackTypeEnum.ToString()}, channel : {channel} payload Length : {payload.Length}");
-        }
-
-        private void RTCPReceived(RTSPTrackTypeEnum rtspTrackTypeEnum, int channel, byte[] payload)
-        {
-            Console.WriteLine($"RTCP Received : {rtspTrackTypeEnum.ToString()}, channel : {channel} payload Length : {payload.Length}");
-        }
+        }        
 
         public void Dispose()
         {
