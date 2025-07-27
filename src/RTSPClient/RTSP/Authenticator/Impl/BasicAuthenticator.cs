@@ -1,4 +1,5 @@
-﻿using RTSPStream.RTSP.Info;
+﻿using RTSPStream.RTSP.Enum;
+using RTSPStream.RTSP.Info;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -9,7 +10,9 @@ namespace RTSPStream.RTSP.Authenticator.Impl
 {
     internal class BasicAuthenticator : IRTSPAuthenticator
     {
-        private string? _username, _password;
+        public RTSPAuthTypeEnum RTSPAuthType => RTSPAuthTypeEnum.Basic;
+        public RTSPAuthDigestAlgorithmEnum RTSPAuthDigestAlgorithm => RTSPAuthDigestAlgorithmEnum.None;
+        private string? _username, _password; 
 
         public string? GetAuthorizationHeader(RTSPRequestInfo request, RTSPAuthChallenge? challenge)
         {

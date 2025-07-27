@@ -30,6 +30,7 @@ namespace RTSPStream.RTSP
         private string _sessionId;
 
         IRTSPAuthenticator _rtspAuthenticator;
+        RTSPAuthChallenge _rtspAuthChallenge;
         public Uri RTSPUri { get; private set; }
         public RTSPoverEnum RTSPOver { get; private set; }
         public string Username { get; private set; }
@@ -51,63 +52,96 @@ namespace RTSPStream.RTSP
 
         internal List<RTSPTrackTypeEnum> Connect()
         {
-            _tcpClient = new TcpClient();
-            _tcpClient.Connect(RTSPUri.Host, RTSPUri.Port > 0 ? RTSPUri.Port : 554);
-            _stream = _tcpClient.GetStream();
+            InitTcpClient();
+            StartReceiveLoopAsync();
 
-            _recvCts = new CancellationTokenSource();
-            _recvTask = Task.Run(() => ReceiveLoopAsync(_recvCts.Token));
-
-            var authTrials = new List<Func<IRTSPAuthenticator>>
+            var authTrials = new List<IRTSPAuthenticator>
             {
-                () =>
-                    new AnonymousAuthenticator(),
-                () =>
-                {
-                    var auth = new BasicAuthenticator();
-                    auth.SetCredential(Username, Password);
-                    return auth;
-                },
-                () =>
-                {
-                    var auth = new DigestMD5Authenticator();
-                    auth.SetCredential(Username, Password);
-                    return auth;
-                },
-                () =>
-                {
-                    var auth = new DigestSHA256Authenticator();
-                    auth.SetCredential(Username, Password);
-                    return auth;
-                }
+                new AnonymousAuthenticator(), 
+                new BasicAuthenticator(), 
+                new DigestMD5Authenticator(), 
+                new DigestSHA256Authenticator()
             };
+            
             int cseq = 0;
+            string response = string.Empty;
 
             foreach (var authFactory in authTrials)
             {
-                _rtspAuthenticator = authFactory();
+                _rtspAuthenticator = authFactory;
 
-                string response = SendDescribeMethod();
+                if (_rtspAuthenticator.RTSPAuthType != RTSPAuthTypeEnum.None)
+                    _rtspAuthenticator.SetCredential(Username, Password);
+
+                if ((_rtspAuthenticator.RTSPAuthType == RTSPAuthTypeEnum.Basic || _rtspAuthenticator.RTSPAuthType == RTSPAuthTypeEnum.Digest) &&
+                    IsUnauthorized(response, _rtspAuthenticator.RTSPAuthDigestAlgorithm, out _rtspAuthChallenge) == false)
+                    continue;
+
+                response = SendDescribeMethod();
 
                 if (IsResponseOK(response, out cseq) && _cseq - 1 == cseq)
                 {
                     return ParseSdpAndAddTracks(response);
                 }
-                else if (IsUnauthorized(response, out var challenge))
-                {
-                    var suggestedAuth = SuggestAuthenticatorFromChallenge(challenge, Username, Password);
-                    if (suggestedAuth == null)
-                        continue;
-
-                    response = SendDescribeMethod();
-                    if (IsResponseOK(response, out cseq) && _cseq - 1 == cseq)
-                    {
-                        return ParseSdpAndAddTracks(response);
-                    }
-                }
             }
 
             throw new Exception("RTSP Connect: 모든 인증 방식 실패 또는 서버 접속 불가");
+        }
+
+        private void InitTcpClient()
+        {
+            if (_tcpClient == null)
+            {
+                _tcpClient = new TcpClient();
+                _tcpClient.Connect(RTSPUri.Host, RTSPUri.Port > 0 ? RTSPUri.Port : 554);
+                _stream = _tcpClient.GetStream();
+            }
+        }
+
+        private void DeInitTcpClient()
+        {
+            if (_tcpClient != null)
+            {
+                _tcpClient.Close();
+                _tcpClient = null;
+            }
+        }
+
+        private void StartReceiveLoopAsync()
+        {
+            if (_recvCts == null)
+            {
+                _recvCts = new CancellationTokenSource();
+                _recvTask = Task.Run(() => ReceiveLoopAsync(_recvCts.Token));
+            }
+        }
+
+        private void StopReceiveLoopAsync()
+        {
+            if (_recvCts != null)
+            {
+                try
+                {
+                    _recvTask.Wait();
+                }
+                catch (AggregateException ex)
+                {
+                    if (ex.InnerExceptions.All(e => e is TaskCanceledException))
+                    {
+
+                    }
+                    else
+                    {
+                        throw;
+                    }
+                }
+                finally
+                {
+                    _recvCts.Dispose();
+                    _recvCts = null;
+                    _recvTask = null;
+                }
+            }
         }
 
         internal void DisConnect()
@@ -236,7 +270,10 @@ namespace RTSPStream.RTSP
 
             string setupResponse = SendTeardownMethod(info.ControlUrl);
             if (IsResponseOK(setupResponse, out int cseq) && _cseq - 1 == cseq)
+            {
+
                 return true;
+            }
             else
                 return false;
         }
@@ -254,7 +291,7 @@ namespace RTSPStream.RTSP
                 $"CSeq: {_cseq++}\r\n" +
                 "User-Agent: RTSPStream/1.0\r\n";
 
-            string? authHeader = _rtspAuthenticator.GetAuthorizationHeader(reqInfo, null);
+            string? authHeader = _rtspAuthenticator.GetAuthorizationHeader(reqInfo, _rtspAuthChallenge);
             if (!string.IsNullOrEmpty(authHeader))
                 request += authHeader + "\r\n";
 
@@ -275,7 +312,7 @@ namespace RTSPStream.RTSP
                 "User-Agent: RTSPStream/1.0\r\n" +
                 "Accept: application/sdp\r\n";
 
-            string? authHeader = _rtspAuthenticator.GetAuthorizationHeader(reqInfo, null);
+            string? authHeader = _rtspAuthenticator.GetAuthorizationHeader(reqInfo, _rtspAuthChallenge);
             if (!string.IsNullOrEmpty(authHeader))
                 request += authHeader + "\r\n";
 
@@ -299,7 +336,7 @@ namespace RTSPStream.RTSP
             if (!string.IsNullOrEmpty(_sessionId))
                 request += $"Session: {_sessionId}\r\n";
 
-            string? authHeader = _rtspAuthenticator.GetAuthorizationHeader(reqInfo, null);
+            string? authHeader = _rtspAuthenticator.GetAuthorizationHeader(reqInfo, _rtspAuthChallenge);
             if (!string.IsNullOrEmpty(authHeader))
                 request += authHeader + "\r\n";
 
@@ -322,7 +359,7 @@ namespace RTSPStream.RTSP
             if (!string.IsNullOrEmpty(_sessionId))
                 request += $"Session: {_sessionId}\r\n";
 
-            string? authHeader = _rtspAuthenticator.GetAuthorizationHeader(reqInfo, null);
+            string? authHeader = _rtspAuthenticator.GetAuthorizationHeader(reqInfo, _rtspAuthChallenge);
             if (!string.IsNullOrEmpty(authHeader))
                 request += authHeader + "\r\n";
 
@@ -345,7 +382,7 @@ namespace RTSPStream.RTSP
             if (!string.IsNullOrEmpty(_sessionId))
                 request += $"Session: {_sessionId}\r\n";
 
-            string? authHeader = _rtspAuthenticator.GetAuthorizationHeader(reqInfo, null);
+            string? authHeader = _rtspAuthenticator.GetAuthorizationHeader(reqInfo, _rtspAuthChallenge);
             if (!string.IsNullOrEmpty(authHeader))
                 request += authHeader + "\r\n";
 
@@ -367,7 +404,7 @@ namespace RTSPStream.RTSP
             if (!string.IsNullOrEmpty(_sessionId))
                 request += $"Session: {_sessionId}\r\n";
 
-            string? authHeader = _rtspAuthenticator.GetAuthorizationHeader(reqInfo, null);
+            string? authHeader = _rtspAuthenticator.GetAuthorizationHeader(reqInfo, _rtspAuthChallenge);
             if (!string.IsNullOrEmpty(authHeader))
                 request += authHeader + "\r\n";
 
@@ -406,20 +443,24 @@ namespace RTSPStream.RTSP
             return response.StartsWith("RTSP/1.0 200", StringComparison.OrdinalIgnoreCase);
         }
 
-        private bool IsUnauthorized(string response, out RTSPAuthChallenge challenge)
+        private bool IsUnauthorized(string response, RTSPAuthDigestAlgorithmEnum rtspAuthDigestAlgorithm, out RTSPAuthChallenge challenge)
         {
             challenge = null;
 
             if (response.StartsWith("RTSP/1.0 401", StringComparison.OrdinalIgnoreCase))
             {
                 // WWW-Authenticate 헤더 파싱
-                var match = Regex.Match(response, @"WWW-Authenticate:\s*([^\r\n]+)", RegexOptions.IgnoreCase);
-                if (match.Success)
+                var matches = Regex.Matches(response, @"WWW-Authenticate:\s*([^\r\n]+)", RegexOptions.IgnoreCase);
+                foreach (Match match in matches)
                 {
                     challenge = RtspAuthChallengeParser.Parse(match.Groups[1].Value);
-                    return true;
+
+                    if (challenge != null &&
+                        challenge.Algorithm == rtspAuthDigestAlgorithm)
+                        return true;
                 }
             }
+
             return false;
         }
 
@@ -571,27 +612,6 @@ namespace RTSPStream.RTSP
             return null;
         }
 
-        private IRTSPAuthenticator SuggestAuthenticatorFromChallenge(RTSPAuthChallenge challenge, string username, string password)
-        {
-            if (challenge.Type == RTSPAuthTypeEnum.Digest)
-            {
-                if (challenge.Algorithm == RTSPAuthDigestAlgorithmEnum.MD5)
-                {
-                    var a = new DigestMD5Authenticator(); a.SetCredential(username, password); return a;
-                }
-                else if (challenge.Algorithm == RTSPAuthDigestAlgorithmEnum.SHA256)
-                {
-                    var a = new DigestSHA256Authenticator(); a.SetCredential(username, password); return a;
-                }
-            }
-            else if (challenge.Type == RTSPAuthTypeEnum.Basic)
-            {
-                var a = new BasicAuthenticator(); a.SetCredential(username, password); return a;
-            }
-
-            return null;
-        }
-
         private (int rtp, int rtcp)? ParseInterleavedFromResponse(string response)
         {
             // Transport 헤더만 추출
@@ -630,11 +650,8 @@ namespace RTSPStream.RTSP
 
         public void Dispose()
         {
-            _recvCts?.Cancel();
-            _recvTask?.Wait();
-
-            _recvCts = null;
-            _recvTask = null;
+            StopReceiveLoopAsync();
+            DeInitTcpClient();
         }
     }
 }

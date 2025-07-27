@@ -45,6 +45,9 @@ namespace RTSPStream
             {
                 _rtspClient.Stop(manager.RTSPTrackType);
             }
+
+            _mediaStreamManagerList.Clear();
+            _rtspClient.DisConnect();
         }
 
         public bool Play(RTSPTrackTypeEnum rtspTrackType)
@@ -78,8 +81,13 @@ namespace RTSPStream
 
             if (manager != null)
             {
-                _rtspClient.Stop(rtspTrackType);
-                result = manager.Close();
+                result = _rtspClient.Stop(rtspTrackType);
+
+                if (result)
+                {
+                    result = manager.Close();
+                    _mediaStreamManagerList.Remove(manager);
+                }
             }
 
             return result;

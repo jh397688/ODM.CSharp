@@ -34,7 +34,7 @@ namespace RTSPStream.RTSP.Info
                 {
                     case "realm": challenge.Realm = value; break;
                     case "nonce": challenge.Nonce = value; break;
-                    case "algorithm": challenge.Algorithm = EnumParser.StringToEnum<RTSPAuthDigestAlgorithmEnum>(value); break;
+                    case "algorithm": challenge.Algorithm = EnumParser.StringToEnum<RTSPAuthDigestAlgorithmEnum>(value.Replace("-", "")); break;
                     case "qop": challenge.Qop = value; break;
                     case "opaque": challenge.Opaque = value; break;
                         // 필요시 추가 필드 처리
