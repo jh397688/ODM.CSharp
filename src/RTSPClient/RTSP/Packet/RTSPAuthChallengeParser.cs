@@ -7,7 +7,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
-namespace RTSPStream.RTSP.Info
+namespace RTSPStream.RTSP.Packet
 {
     internal static class RtspAuthChallengeParser
     {

@@ -1,23 +1,24 @@
-﻿using System;
+﻿using RTSPStream.RTSP.Enum;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace RTSPStream.RTSP.Info
+namespace RTSPStream.RTSP.Packet
 {
     internal abstract class RTSPTrackInfoBase
     {
-        public RTSPTrackTypeEnum TrackType { get; protected set; }
+        public RTSPTrackTypeEnum RTSPTrackType { get; protected set; }
         public string Codec { get; protected set; }
         public int TrackId { get; protected set; }
         public string ControlUrl { get; protected set; }
         public int RTPInterleaved { get; protected set; }
         public int RTCPInterleaved { get; protected set; }
 
-        protected RTSPTrackInfoBase(RTSPTrackTypeEnum trackType, string codec, int trackId, string controlUrl)
+        protected RTSPTrackInfoBase(RTSPTrackTypeEnum rtspTrackType, string codec, int trackId, string controlUrl)
         {
-            TrackType = trackType;
+            RTSPTrackType = rtspTrackType;
             Codec = codec;
             TrackId = trackId;
             ControlUrl = controlUrl;

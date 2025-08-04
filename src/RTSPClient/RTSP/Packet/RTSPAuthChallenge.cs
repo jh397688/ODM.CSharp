@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace RTSPStream.RTSP.Info
+namespace RTSPStream.RTSP.Packet
 {
     internal class RTSPAuthChallenge
     {

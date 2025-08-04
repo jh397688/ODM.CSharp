@@ -4,11 +4,13 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace RTSPStream.RTSP.Info
+namespace RTSPStream.MediaStream.RTP.Enum
 {
-    public enum RTSPoverEnum
+    public enum FrameTypeEnum
     {
-        RTSPoverTCP, 
-        RTSPoverUDP,
+        Unknown,
+        IFrame,
+        PFrame,
+        BFrame
     }
 }

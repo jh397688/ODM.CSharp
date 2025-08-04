@@ -1,6 +1,8 @@
-﻿using RTSPStream.MediaStream;
+﻿using RTSPStream.Lib;
+using RTSPStream.Lib.EventBusData;
+using RTSPStream.MediaStream;
 using RTSPStream.RTSP;
-using RTSPStream.RTSP.Info;
+using RTSPStream.RTSP.Enum;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,21 +14,42 @@ namespace RTSPStream
 {
     public class RTSPStreamClient : IDisposable
     {
-        RTSPClient _rtspClient;
-        List<MediaStreamManager> _mediaStreamManagerList;
         public Uri RTSPUri { get; private set; }
         public RTSPoverEnum RTSPOver { get; private set; }
         public List<RTSPTrackTypeEnum> RTSPTrackTypeList { get; private set; }
+
+        private EventBus _eventBus;
+        private RTSPClient _rtspClient;
+        private List<MediaStreamManager> _mediaStreamManagerList;
 
         public RTSPStreamClient(string rtspUri, RTSPoverEnum rtspOver)
         {
             RTSPUri = new Uri(rtspUri);
             RTSPOver = rtspOver;
 
-            _rtspClient = new RTSPClient(RTSPUri, RTSPOver);
+            _eventBus = new EventBus();
+            _rtspClient = new RTSPClient(_eventBus, RTSPUri, RTSPOver);
             _mediaStreamManagerList = new List<MediaStreamManager>();
 
             RTSPTrackTypeList = new List<RTSPTrackTypeEnum>();
+
+            SetEventBus();
+        }
+
+        private void SetEventBus()
+        {
+            _eventBus.Subscribe<RTPPacketReceivedEventData>(RTPPacketStreamEvent);
+            _eventBus.Subscribe<RTPCombinePacketReceivedEventData>(RTPCombinePacketStreamEvent);
+        }
+
+        private void RTPPacketStreamEvent(RTPPacketReceivedEventData data)
+        {
+            Console.WriteLine($"RTPPacketStreamEvent RTSPTrackType : {data.RTSPTrackType} Length : {data.RTPPacket.OriginData.Length}");
+        }
+
+        private void RTPCombinePacketStreamEvent(RTPCombinePacketReceivedEventData data)
+        {
+            Console.WriteLine($"RTPCombinePacketStreamEvent RTSPTrackType : {data.RTSPTrackType} FrameType : {data.RTPCombinePacket.FrameType.ToString()}");
         }
 
         public void SetAuth(string username, string password)
@@ -61,12 +84,7 @@ namespace RTSPStream
 
                 if (result)
                 {
-                    var mediaStreamManager = new MediaStreamManager(RTSPOver, rtspTrackType, rtpChannel, rtcpChannel);
-                    _rtspClient.RTPReceivedEvent += mediaStreamManager.RTPReceived;
-                    _rtspClient.RTCPReceivedEvent += mediaStreamManager.RTCPReceived;
-
-
-                    _mediaStreamManagerList.Add(mediaStreamManager);
+                    _mediaStreamManagerList.Add(new MediaStreamManager(_eventBus, RTSPOver, rtspTrackType, rtpChannel, rtcpChannel));
                 }
             }
 

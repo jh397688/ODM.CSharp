@@ -1,5 +1,5 @@
 ﻿using RTSPStream;
-using RTSPStream.RTSP.Info;
+using RTSPStream.RTSP.Enum;
 
 namespace RTSPClient.Test
 {

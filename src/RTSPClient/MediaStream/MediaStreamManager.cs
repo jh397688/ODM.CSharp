@@ -1,12 +1,16 @@
-﻿using RTSPStream.MediaStream.RTCP;
+﻿using RTSPStream.Lib;
+using RTSPStream.Lib.EventBusData;
+using RTSPStream.MediaStream.RTCP;
 using RTSPStream.MediaStream.RTP;
+using RTSPStream.MediaStream.RTP.Packet;
 using RTSPStream.RTSP;
-using RTSPStream.RTSP.Info;
+using RTSPStream.RTSP.Enum;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 
 namespace RTSPStream.MediaStream
@@ -15,21 +19,48 @@ namespace RTSPStream.MediaStream
     {
         public RTSPTrackTypeEnum RTSPTrackType { get; internal set; }
 
+        private EventBus _eventBus;
         private RTSPoverEnum _rtspOver;
         private int _rtpChannel;
         private int _rtcpChannel;
         private RTPManager _rtpManager;
         private RTCPManager _rtcpManager;
 
-        public MediaStreamManager(RTSPoverEnum rTSPOver, RTSPTrackTypeEnum rtspTrackType, int rtpChannel, int rtcpChannel)
+        public MediaStreamManager(EventBus _eventBus, RTSPoverEnum rTSPOver, RTSPTrackTypeEnum rtspTrackType, int rtpChannel, int rtcpChannel)
         {
+            this._eventBus = _eventBus;
             this._rtspOver = rTSPOver;
             this.RTSPTrackType = rtspTrackType;
             this._rtpChannel = rtpChannel;
             this._rtcpChannel = rtcpChannel;
 
+            this._rtpManager = new RTPManager(_eventBus, RTSPTrackType, _rtpChannel);
+            this._rtcpManager = new RTCPManager(_eventBus, RTSPTrackType, _rtcpChannel);
+
             if (this._rtspOver == RTSPoverEnum.RTSPoverUDP)
                 SetUdpClient();
+
+            SetEventBus();
+        }
+
+        private void SetEventBus()
+        {
+            this._eventBus.Subscribe<RTSPClietnReceivedEventData>(InterleavedPacketEvent);
+        }
+
+        private void InterleavedPacketEvent(RTSPClietnReceivedEventData data)
+        {
+            if (data.RTSPTrackType != this.RTSPTrackType)
+                return;
+
+            if (data.Channel == _rtpChannel) _rtpManager.RTPReceived(data.Buffer);
+
+            if (data.Channel == _rtcpChannel) _rtcpManager.RTCPReceived(data.Buffer);
+        }
+
+        internal bool Close()
+        {
+            return true;
         }
 
         private void SetUdpClient()
@@ -37,25 +68,9 @@ namespace RTSPStream.MediaStream
             throw new NotImplementedException();
         }
 
-        public void RTPReceived(RTSPTrackTypeEnum rtspTrackType, int channel, byte[] payload)
+        private void RTPCombineBufferStream(RTPCombinePacket rtpCombinePacket)
         {
-            if (this.RTSPTrackType != rtspTrackType)
-                return;
-
-            Console.WriteLine($"RTP Received : {rtspTrackType.ToString()}, channel : {channel}, payload Length : {payload.Length}");
-        }
-
-        public void RTCPReceived(RTSPTrackTypeEnum rtspTrackType, int channel, byte[] payload)
-        {
-            if (this.RTSPTrackType != rtspTrackType)
-                return;
-
-            Console.WriteLine($"RTCP Received : {rtspTrackType.ToString()}, channel : {channel}, payload Length : {payload.Length}");
-        }
-
-        internal bool Close()
-        {
-            return true;
+            
         }
     }
 }

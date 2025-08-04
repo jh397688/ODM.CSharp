@@ -1,8 +1,9 @@
 ﻿using RTSPStream.Lib;
+using RTSPStream.Lib.EventBusData;
 using RTSPStream.RTSP.Authenticator;
 using RTSPStream.RTSP.Authenticator.Impl;
 using RTSPStream.RTSP.Enum;
-using RTSPStream.RTSP.Info;
+using RTSPStream.RTSP.Packet;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -13,13 +14,14 @@ using System.Threading.Tasks;
 
 namespace RTSPStream.RTSP
 {
-    internal delegate void RTSPClientReceivedEventHandler(RTSPTrackTypeEnum rtspTrackTypeEnum, int chanel, byte[] payload);
-
     internal class RTSPClient : IDisposable
     {
-        internal RTSPClientReceivedEventHandler RTPReceivedEvent;
-        internal RTSPClientReceivedEventHandler RTCPReceivedEvent;
+        public Uri RTSPUri { get; private set; }
+        public RTSPoverEnum RTSPOver { get; private set; }
+        public string Username { get; private set; }
+        public string Password { get; private set; }
 
+        private EventBus _eventBus;
         private TcpClient _tcpClient;
         private NetworkStream _stream;
         private CancellationTokenSource _recvCts;
@@ -28,18 +30,15 @@ namespace RTSPStream.RTSP
         private List<RTSPTrackInfoBase> _rtpsTrackInfoList;
         private int _cseq = 1;
         private string _sessionId;
+        private IRTSPAuthenticator _rtspAuthenticator;
+        private RTSPAuthChallenge _rtspAuthChallenge;
 
-        IRTSPAuthenticator _rtspAuthenticator;
-        RTSPAuthChallenge _rtspAuthChallenge;
-        public Uri RTSPUri { get; private set; }
-        public RTSPoverEnum RTSPOver { get; private set; }
-        public string Username { get; private set; }
-        public string Password { get; private set; }
-
-        public RTSPClient(Uri rtspUri, RTSPoverEnum rtspOver)
+        public RTSPClient(EventBus eventBus, Uri rtspUri, RTSPoverEnum rtspOver)
         {
+            _eventBus = eventBus;
             RTSPUri = rtspUri;
             RTSPOver = rtspOver;
+
             _commonWaiter = new CommonWaiter();
             _rtpsTrackInfoList = new List<RTSPTrackInfoBase>();
         }
@@ -207,10 +206,7 @@ namespace RTSPStream.RTSP
                         var track = _rtpsTrackInfoList.FirstOrDefault(info => channel == info.RTPInterleaved || channel == info.RTCPInterleaved);
                         if (track != null)
                         {
-                            if (channel == track.RTPInterleaved)
-                                RTPReceivedEvent?.Invoke(track.TrackType, channel, payload);
-                            else
-                                RTCPReceivedEvent?.Invoke(track.TrackType, channel, payload);
+                            _eventBus.Publish(new RTSPClietnReceivedEventData(track.RTSPTrackType, payload, channel));
                         }
                     }
                 }
@@ -231,14 +227,13 @@ namespace RTSPStream.RTSP
             return -1;
         }
 
-
         internal bool Play(RTSPTrackTypeEnum rtspTrackType, out int rtpChannel, out int rtcpChannel)
         {
             rtpChannel = 0;
             rtcpChannel = 0;
             int cseq = 0;
 
-            var info = _rtpsTrackInfoList.Find(info => info.TrackType == rtspTrackType);
+            var info = _rtpsTrackInfoList.Find(info => info.RTSPTrackType == rtspTrackType);
 
             string transportHeader = RTSPOver == RTSPoverEnum.RTSPoverTCP ? "RTP/AVP/TCP;unicast;interleaved=0-1" : "RTP/AVP;unicast;client_port=5000-5001";
 
@@ -266,7 +261,7 @@ namespace RTSPStream.RTSP
 
         internal bool Stop(RTSPTrackTypeEnum rtspTrackType)
         {
-            var info = _rtpsTrackInfoList.Find(info => info.TrackType == rtspTrackType);
+            var info = _rtpsTrackInfoList.Find(info => info.RTSPTrackType == rtspTrackType);
 
             string setupResponse = SendTeardownMethod(info.ControlUrl);
             if (IsResponseOK(setupResponse, out int cseq) && _cseq - 1 == cseq)
