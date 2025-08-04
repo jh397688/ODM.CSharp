@@ -1,0 +1,56 @@
+﻿<Window x:Class="OnvifDeviceManager.Util.UI.ExceptionMessageBox"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:OnvifDeviceManager.Util.UI"
+        mc:Ignorable="d"
+        Title="예외 발생" Width="500" MinWidth="400"
+        SizeToContent="Height" Topmost="True"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResizeWithGrip">
+    
+    <Border Padding="12" Background="White" CornerRadius="6" SnapsToDevicePixels="True">
+        <DockPanel LastChildFill="True">
+            <StackPanel DockPanel.Dock="Top" Orientation="Vertical" Margin="0,0,0,8">
+                <TextBlock x:Name="CustomMsgTBK"
+                           FontSize="16" FontWeight="Bold" TextWrapping="Wrap"
+                           Margin="0,0,0,6"/>
+                
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" >
+                    <Button x:Name="ViewDetailInfoBTN"
+                            Content="자세히 보기 ▼" Padding="8,4"
+                            Click="ViewDetailInfoBTN_Click"/>
+                </StackPanel>
+            </StackPanel>
+            
+            <Border x:Name="DetailContainer" Visibility="Collapsed" BorderBrush="#DDD" BorderThickness="1" CornerRadius="4" Padding="8" Background="#F9F9F9">
+                <StackPanel Orientation="Vertical" >
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                        <TextBlock Text="클래스: " FontWeight="SemiBold"/>
+                        <TextBlock x:Name="ClassNameTBK" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                        <TextBlock Text="메소드: " FontWeight="SemiBold"/>
+                        <TextBlock x:Name="MethodNameTBK" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    
+                    <TextBlock Text="Exception 메시지:" FontWeight="SemiBold" Margin="0,8,0,2"/>
+                    <ScrollViewer Height="100" VerticalScrollBarVisibility="Auto" Margin="0,0,0,6">
+                        <TextBlock x:Name="EXMessageTBK" TextWrapping="Wrap" />
+                    </ScrollViewer>
+                    
+                    <TextBlock Text="스택 트레이스:" FontWeight="SemiBold" Margin="0,8,0,2"/>
+                    <ScrollViewer Height="140" VerticalScrollBarVisibility="Auto">
+                        <TextBlock x:Name="EXStackTraceTBK" FontFamily="Consolas" TextWrapping="Wrap"/>
+                    </ScrollViewer>
+                    
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+                        <Button Content="닫기" Width="80" Click="CloseBtn_Click" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </DockPanel>
+    </Border>
+</Window>
